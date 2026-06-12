@@ -168,11 +168,69 @@ def ago(epoch: float) -> str:
     return f"{s // 86400}d ago"
 
 
+def find_session_transcripts(projects: Path, needle: str) -> list[tuple[Path, dict]]:
+    """Return (path, info) pairs whose session ID, custom name, or AI title match needle."""
+    needle = needle.lower()
+    results: dict[Path, dict] = {}
+    for transcript in projects.glob("*/*.jsonl"):
+        if transcript.stem.lower().startswith(needle):
+            results[transcript] = {"session_id": transcript.stem,
+                                   "custom_name": "", "ai_title": ""}
+            continue
+        info = summarize_session(transcript)
+        if info and (needle in info["custom_name"].lower()
+                     or needle in info["ai_title"].lower()):
+            results[transcript] = info
+    return list(results.items())
+
+
+def show_session(path: Path, max_messages: int) -> int:
+    """Print the last max_messages user/assistant turns from a transcript."""
+    lines = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError as e:
+        print(f"Cannot read {path}: {e}", file=sys.stderr)
+        return 1
+
+    turns = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("type") not in ("user", "assistant"):
+            continue
+        text = extract_text(rec.get("message") or {})
+        if not text.strip():
+            continue
+        turns.append((rec["type"], rec.get("timestamp", ""), text))
+
+    for role, ts, text in turns[-max_messages:]:
+        label = f"[{role}]"
+        time_str = ""
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                time_str = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                time_str = ts
+        print(f"\033[1m{label}\033[0m {time_str}")
+        print(text.strip())
+        print()
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--hours", type=float, default=24,
                     help="only show sessions active in the last N hours (0 = all)")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of a table")
+    ap.add_argument("--session", metavar="PREFIX",
+                    help="drill down into a session: print its last --messages turns")
+    ap.add_argument("--messages", type=int, default=20, metavar="N",
+                    help="number of turns to show with --session (default 20)")
     args = ap.parse_args()
 
     projects = CLAUDE_DIR / "projects"
@@ -180,6 +238,20 @@ def main() -> int:
         print(f"No {projects} directory found - has Claude Code run on this machine?",
               file=sys.stderr)
         return 1
+
+    if args.session:
+        matched = find_session_transcripts(projects, args.session)
+        if not matched:
+            print(f"No session found matching '{args.session}'.", file=sys.stderr)
+            return 1
+        if len(matched) > 1:
+            print(f"Ambiguous: '{args.session}' matches {len(matched)} sessions:",
+                  file=sys.stderr)
+            for path, info in sorted(matched):
+                name = info["custom_name"] or info["ai_title"] or info["session_id"]
+                print(f"  {info['session_id'][:8]}  {name}", file=sys.stderr)
+            return 1
+        return show_session(matched[0][0], args.messages)
 
     cutoff = time.time() - args.hours * 3600 if args.hours > 0 else 0
     sessions = []
