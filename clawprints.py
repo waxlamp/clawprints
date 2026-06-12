@@ -157,6 +157,31 @@ def live_claude_cwds() -> set[str]:
     return cwds
 
 
+def read_jobs(jobs_dir: Path) -> dict[str, dict]:
+    """Read state.json for each background job. Keyed by daemonShort (8-char ID)."""
+    jobs = {}
+    if not jobs_dir.is_dir():
+        return jobs
+    for state_file in jobs_dir.glob("*/state.json"):
+        try:
+            state = json.loads(state_file.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        short = state.get("daemonShort") or state_file.parent.name
+        jobs[short] = state
+    return jobs
+
+
+def read_roster(daemon_dir: Path) -> set[str]:
+    """Return short IDs of worker processes currently listed in the daemon roster."""
+    roster_file = daemon_dir / "roster.json"
+    try:
+        roster = json.loads(roster_file.read_text())
+        return set(roster.get("workers", {}).keys())
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+
 def ago(epoch: float) -> str:
     s = int(time.time() - epoch)
     if s < 60:
@@ -253,21 +278,45 @@ def main() -> int:
             return 1
         return show_session(matched[0][0], args.messages)
 
+    jobs = read_jobs(CLAUDE_DIR / "jobs")
+    active_workers = read_roster(CLAUDE_DIR / "daemon")
+
     cutoff = time.time() - args.hours * 3600 if args.hours > 0 else 0
     sessions = []
     for transcript in projects.glob("*/*.jsonl"):
         if transcript.stat().st_mtime < cutoff:
             continue
         info = summarize_session(transcript)
-        if info:
-            sessions.append(info)
+        if not info:
+            continue
+        short = info["session_id"][:8]
+        if short in jobs:
+            job = jobs[short]
+            info["custom_name"] = info["custom_name"] or job.get("name", "")
+            info["ai_title"] = info["ai_title"] or job.get("detail", "")
+            if not info["last_message"]:
+                info["last_message"] = job.get("intent", "")[:160]
+                info["last_role"] = ""
+            info["_job_state"] = job.get("state", "")
+            info["_job_tempo"] = job.get("tempo", "")
+            info["_job_has_output"] = job.get("output") is not None
+            info["_is_agent"] = True
+        sessions.append(info)
 
     sessions.sort(key=lambda s: s["last_active_epoch"], reverse=True)
 
     live = live_claude_cwds()
     seen_live_cwd = set()
-    for s in sessions:  # newest transcript per live cwd is presumed the live one
-        if s["cwd"] in live and s["cwd"] not in seen_live_cwd:
+    for s in sessions:
+        short = s["session_id"][:8]
+        if s.get("_is_agent"):
+            if s["_job_state"] == "done" and s["_job_has_output"]:
+                s["status"] = "DONE"
+            elif short in active_workers:
+                s["status"] = "WORK" if s["_job_tempo"] == "working" else "WAIT"
+            else:
+                s["status"] = "STALE"
+        elif s["cwd"] in live and s["cwd"] not in seen_live_cwd:
             s["status"] = "LIVE"
             seen_live_cwd.add(s["cwd"])
         else:
@@ -288,12 +337,17 @@ def main() -> int:
         cwd = s["cwd"].replace(home, "~", 1) if s["cwd"] else "?"
         custom = s["custom_name"] or "-"
         ai = s["ai_title"] or "-"
-        msg = f"[{s['last_role']}] {s['last_message']}" if s["last_message"] else ""
+        if s["last_message"]:
+            role_prefix = f"[{s['last_role']}] " if s["last_role"] else ""
+            msg = role_prefix + s["last_message"]
+        else:
+            msg = ""
         print(f"{s['status']:<7} {ago(s['last_active_epoch']):<12} "
               f"{custom[:20]:<20} {ai[:24]:<24} {s['session_id'][:8]:<10} "
               f"{cwd[:28]:<28} {msg[:50]}")
-    print(f"\n{len(sessions)} session(s) · {len(live)} live claude process cwd(s) "
-          f"· source: {projects}")
+    agent_count = sum(1 for s in sessions if s.get("_is_agent"))
+    print(f"\n{len(sessions)} session(s) · {agent_count} agent · "
+          f"{len(live)} live claude process cwd(s) · source: {projects}")
     return 0
 
 
