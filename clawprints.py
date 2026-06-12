@@ -157,6 +157,24 @@ def live_claude_cwds() -> set[str]:
     return cwds
 
 
+_STATUS_COLORS = {
+    "ENDED": "\033[90m",
+    "LIVE":  "\033[32m",
+    "DONE":  "\033[34m",
+    "WORK":  "\033[33m",
+    "WAIT":  "\033[31m",
+    "STALE": "\033[31m",
+}
+_RESET = "\033[0m"
+_VISUAL_STATUS_WIDTH = 7  # "STATUS" header + 1
+
+
+def status_cell(status: str) -> str:
+    color = _STATUS_COLORS.get(status, "")
+    cell = f"{color}{status}{_RESET}"
+    return cell + " " * max(0, _VISUAL_STATUS_WIDTH - len(status))
+
+
 def read_jobs(jobs_dir: Path) -> dict[str, dict]:
     """Read state.json for each background job. Keyed by daemonShort (8-char ID)."""
     jobs = {}
@@ -320,7 +338,7 @@ def main() -> int:
             s["status"] = "LIVE"
             seen_live_cwd.add(s["cwd"])
         else:
-            s["status"] = "idle"
+            s["status"] = "ENDED"
 
     if args.json:
         print(json.dumps(sessions, indent=2))
@@ -331,8 +349,8 @@ def main() -> int:
         return 0
 
     home = str(Path.home())
-    print(f"{'STATUS':<7} {'LAST ACTIVE':<12} {'CUSTOM NAME':<20} {'AI TITLE':<24} "
-          f"{'SESSION':<10} {'CWD':<28} LAST MESSAGE")
+    print(f"{'STATUS':<{_VISUAL_STATUS_WIDTH}} {'LAST ACTIVE':<12} {'CUSTOM NAME':<20} "
+          f"{'AI TITLE':<24} {'SESSION':<10} {'CWD':<28} LAST MESSAGE")
     for s in sessions:
         cwd = s["cwd"].replace(home, "~", 1) if s["cwd"] else "?"
         custom = s["custom_name"] or "-"
@@ -342,7 +360,7 @@ def main() -> int:
             msg = role_prefix + s["last_message"]
         else:
             msg = ""
-        print(f"{s['status']:<7} {ago(s['last_active_epoch']):<12} "
+        print(f"{status_cell(s['status'])} {ago(s['last_active_epoch']):<12} "
               f"{custom[:20]:<20} {ai[:24]:<24} {s['session_id'][:8]:<10} "
               f"{cwd[:28]:<28} {msg[:50]}")
     agent_count = sum(1 for s in sessions if s.get("_is_agent"))
