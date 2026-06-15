@@ -160,10 +160,10 @@ def live_claude_cwds() -> set[str]:
 _STATUS_COLORS = {
     "ENDED": "\033[90m",
     "LIVE":  "\033[32m",
-    "DONE":  "\033[34m",
-    "WORK":  "\033[33m",
-    "WAIT":  "\033[31m",
-    "STALE": "\033[31m",
+    "↳DONE":  "\033[34m",
+    "↳WORK":  "\033[33m",
+    "↳WAIT":  "\033[31m",
+    "↳STALE": "\033[31m",
 }
 _RESET = "\033[0m"
 _VISUAL_STATUS_WIDTH = 7  # "STATUS" header + 1
@@ -329,11 +329,11 @@ def main() -> int:
         short = s["session_id"][:8]
         if s.get("_is_agent"):
             if s["_job_state"] == "done" and s["_job_has_output"]:
-                s["status"] = "DONE"
+                s["status"] = "↳DONE"
             elif short in active_workers:
-                s["status"] = "WORK" if s["_job_tempo"] == "working" else "WAIT"
+                s["status"] = "↳WORK" if s["_job_tempo"] == "working" else "↳WAIT"
             else:
-                s["status"] = "STALE"
+                s["status"] = "↳STALE"
         elif s["cwd"] in live and s["cwd"] not in seen_live_cwd:
             s["status"] = "LIVE"
             seen_live_cwd.add(s["cwd"])
