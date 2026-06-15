@@ -267,8 +267,8 @@ def show_session(path: Path, max_messages: int) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--hours", type=float, default=24,
-                    help="only show sessions active in the last N hours (0 = all)")
+    ap.add_argument("--hours", type=float, default=0,
+                    help="only show sessions active in the last N hours (default 0 = all)")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     ap.add_argument("--session", metavar="PREFIX",
                     help="drill down into a session: print its last --messages turns")
@@ -345,7 +345,8 @@ def main() -> int:
         return 0
 
     if not sessions:
-        print("No sessions in the selected window. Try --hours 0 to see everything.")
+        msg = "No active sessions."
+        print(msg)
         return 0
 
     home = str(Path.home())
