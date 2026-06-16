@@ -9,6 +9,7 @@ clawprints uses [uv](https://docs.astral.sh/uv/) to manage its dependency (`psut
 
 | Column | Description |
 |--------|-------------|
+| PID | Process ID of the running Claude process, or `-` if none |
 | STATUS | Session state (see below) |
 | LAST ACTIVE | Time since the transcript file was last written |
 | CUSTOM NAME | Name set by `/rename` |
@@ -25,26 +26,33 @@ clawprints uses [uv](https://docs.astral.sh/uv/) to manage its dependency (`psut
 | ENDED | gray | Interactive session whose process is gone — transcript only, not resumable |
 | ↳WORK | yellow | Background agent job actively running |
 | ↳WAIT | red | Background agent job alive in the daemon but not actively running — likely blocked on user input |
-| ↳DONE | blue | Background agent job that ran to completion |
+| ↳DONE | blue | Background agent job that ran to completion. Resumable via `claude --resume <id>`. |
 | ↳STALE | red | Background agent job that never finished and whose process is no longer in the daemon roster |
 
 Agent sessions (↳) are sourced from `~/.claude/jobs/` and `~/.claude/daemon/roster.json` in addition to the transcript.
 
+## Default behavior
+
+Running `./clawprints.py` with no flags shows all sessions regardless of age, but only those that are still active: LIVE, ↳WORK, ↳WAIT, and ↳STALE. Ended interactive sessions (ENDED) and completed agent jobs (↳DONE) are hidden unless you pass `--all`. Use `--hours N` to further narrow the view to sessions active within the last N hours.
+
 ## Usage
 
 ```bash
-# sessions active in the last 24 hours (default)
+# active sessions only (default)
 ./clawprints.py
 
-# all sessions ever recorded
-./clawprints.py --hours 0
+# include ended interactive sessions and completed agent jobs
+./clawprints.py --all
+
+# limit to sessions active in the last 2 hours
+./clawprints.py --hours 2
 
 # machine-readable JSON output
 ./clawprints.py --json
 
-# drill down into a session (by ID prefix, custom name, or AI title)
+# drill down into a session (match by ID prefix, custom name, or AI title)
 ./clawprints.py --session <prefix>
 
-# show more or fewer turns in drill-down mode (default: 20)
-./clawprints.py --session <prefix> --messages 10
+# drill down showing only the last 5 turns
+./clawprints.py --session <prefix> --messages 5
 ```
