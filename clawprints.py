@@ -142,19 +142,19 @@ def summarize_session(path: Path) -> dict | None:
     }
 
 
-def live_claude_cwds() -> set[str]:
-    """cwds of running processes that look like the Claude Code CLI."""
-    cwds = set()
-    for proc in psutil.process_iter(["name", "cmdline", "cwd"]):
+def live_claude_procs() -> dict[str, int]:
+    """Map cwd → pid for running processes that look like the Claude Code CLI."""
+    procs = {}
+    for proc in psutil.process_iter(["name", "cmdline", "cwd", "pid"]):
         try:
             name = (proc.info["name"] or "").lower()
             cmdline = " ".join(proc.info["cmdline"] or []).lower()
             if name == "claude" or " claude" in cmdline or cmdline.startswith("claude"):
                 if proc.info["cwd"]:
-                    cwds.add(proc.info["cwd"])
+                    procs[proc.info["cwd"]] = proc.info["pid"]
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
-    return cwds
+    return procs
 
 
 _STATUS_COLORS = {
@@ -190,14 +190,15 @@ def read_jobs(jobs_dir: Path) -> dict[str, dict]:
     return jobs
 
 
-def read_roster(daemon_dir: Path) -> set[str]:
-    """Return short IDs of worker processes currently listed in the daemon roster."""
+def read_roster(daemon_dir: Path) -> dict[str, int]:
+    """Return short_id → pid for workers currently listed in the daemon roster."""
     roster_file = daemon_dir / "roster.json"
     try:
         roster = json.loads(roster_file.read_text())
-        return set(roster.get("workers", {}).keys())
+        return {short: w["pid"] for short, w in roster.get("workers", {}).items()
+                if "pid" in w}
     except (OSError, json.JSONDecodeError):
-        return set()
+        return {}
 
 
 def ago(epoch: float) -> str:
@@ -325,19 +326,22 @@ def main() -> int:
 
     sessions.sort(key=lambda s: s["last_active_epoch"], reverse=True)
 
-    live = live_claude_cwds()
+    live = live_claude_procs()
     seen_live_cwd = set()
     for s in sessions:
         short = s["session_id"][:8]
+        s["pid"] = None
         if s.get("_is_agent"):
             if s["_job_state"] == "done" and s["_job_has_output"]:
                 s["status"] = "↳DONE"
             elif short in active_workers:
                 s["status"] = "↳WORK" if s["_job_tempo"] == "working" else "↳WAIT"
+                s["pid"] = active_workers[short]
             else:
                 s["status"] = "↳STALE"
         elif s["cwd"] in live and s["cwd"] not in seen_live_cwd:
             s["status"] = "LIVE"
+            s["pid"] = live[s["cwd"]]
             seen_live_cwd.add(s["cwd"])
         else:
             s["status"] = "ENDED"
@@ -357,18 +361,19 @@ def main() -> int:
         return 0
 
     home = str(Path.home())
-    print(f"{'STATUS':<{_VISUAL_STATUS_WIDTH}} {'LAST ACTIVE':<12} {'CUSTOM NAME':<20} "
-          f"{'AI TITLE':<24} {'SESSION':<10} {'CWD':<28} LAST MESSAGE")
+    print(f"{'PID':<8} {'STATUS':<{_VISUAL_STATUS_WIDTH}} {'LAST ACTIVE':<12} "
+          f"{'CUSTOM NAME':<20} {'AI TITLE':<24} {'SESSION':<10} {'CWD':<28} LAST MESSAGE")
     for s in sessions:
         cwd = s["cwd"].replace(home, "~", 1) if s["cwd"] else "?"
         custom = s["custom_name"] or "-"
         ai = s["ai_title"] or "-"
+        pid_str = str(s["pid"]) if s.get("pid") else "-"
         if s["last_message"]:
             role_prefix = f"[{s['last_role']}] " if s["last_role"] else ""
             msg = role_prefix + s["last_message"]
         else:
             msg = ""
-        print(f"{status_cell(s['status'])} {ago(s['last_active_epoch']):<12} "
+        print(f"{pid_str:<8} {status_cell(s['status'])} {ago(s['last_active_epoch']):<12} "
               f"{custom[:20]:<20} {ai[:24]:<24} {s['session_id'][:8]:<10} "
               f"{cwd[:28]:<28} {msg[:50]}")
     agent_count = sum(1 for s in sessions if s.get("_is_agent"))
