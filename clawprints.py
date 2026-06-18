@@ -366,21 +366,26 @@ def main() -> int:
         print(msg)
         return 0
 
+    _NAME_WIDTH = 28
     home = str(Path.home())
     print(f"{'PID':<8} {'STATUS':<{_VISUAL_STATUS_WIDTH}} {'LAST ACTIVE':<12} "
-          f"{'CUSTOM NAME':<20} {'AI TITLE':<24} {'SESSION':<10} {'CWD':<28} LAST MESSAGE")
+          f"{'NAME':<{_NAME_WIDTH}} {'SESSION':<37} {'CWD':<28} LAST MESSAGE")
     for s in sessions:
         cwd = s["cwd"].replace(home, "~", 1) if s["cwd"] else "?"
-        custom = s["custom_name"] or "-"
-        ai = s["ai_title"] or "-"
         pid_str = str(s["pid"]) if s.get("pid") else "-"
+        if s["custom_name"]:
+            raw = s["custom_name"][:_NAME_WIDTH]
+            name_cell = f"\033[35m{raw}\033[0m" + " " * (_NAME_WIDTH - len(raw))
+        else:
+            raw = (s["ai_title"] or "-")[:_NAME_WIDTH]
+            name_cell = raw + " " * (_NAME_WIDTH - len(raw))
         if s["last_message"]:
             role_prefix = f"[{s['last_role']}] " if s["last_role"] else ""
             msg = role_prefix + s["last_message"]
         else:
             msg = ""
         print(f"{pid_str:<8} {status_cell(s['status'])} {ago(s['last_active_epoch']):<12} "
-              f"{custom[:20]:<20} {ai[:24]:<24} {s['session_id'][:8]:<10} "
+              f"{name_cell} {s['session_id']:<37} "
               f"{cwd[:28]:<28} {msg[:50]}")
     agent_count = sum(1 for s in sessions if s.get("_is_agent"))
     live_count = sum(1 for s in sessions if s["status"] == "LIVE")
