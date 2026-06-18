@@ -1,9 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = [
-#   "psutil",
-# ]
+# dependencies = []
 # ///
 """
 claude_sessions.py - a read-only birdseye view of Claude Code sessions.
@@ -30,8 +28,6 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-
-import psutil
 
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 TAIL_BYTES = 64 * 1024  # how much of the end of a transcript to inspect
@@ -142,19 +138,29 @@ def summarize_session(path: Path) -> dict | None:
     }
 
 
-def live_claude_procs() -> dict[str, int]:
-    """Map cwd → pid for running processes that look like the Claude Code CLI."""
-    procs = {}
-    for proc in psutil.process_iter(["name", "cmdline", "cwd", "pid"]):
+def read_session_pids(sessions_dir: Path) -> dict[str, int]:
+    """Return sessionId → pid for all registered interactive sessions."""
+    result = {}
+    if not sessions_dir.is_dir():
+        return result
+    for f in sessions_dir.glob("*.json"):
         try:
-            name = (proc.info["name"] or "").lower()
-            cmdline = " ".join(proc.info["cmdline"] or []).lower()
-            if name == "claude" or " claude" in cmdline or cmdline.startswith("claude"):
-                if proc.info["cwd"]:
-                    procs[proc.info["cwd"]] = proc.info["pid"]
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            data = json.loads(f.read_text())
+            sid = data.get("sessionId")
+            pid = data.get("pid")
+            if sid and pid:
+                result[sid] = pid
+        except (OSError, json.JSONDecodeError):
             continue
-    return procs
+    return result
+
+
+def is_pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
 
 
 _STATUS_COLORS = {
@@ -326,8 +332,7 @@ def main() -> int:
 
     sessions.sort(key=lambda s: s["last_active_epoch"], reverse=True)
 
-    live = live_claude_procs()
-    seen_live_cwd = set()
+    session_pids = read_session_pids(CLAUDE_DIR / "sessions")
     for s in sessions:
         short = s["session_id"][:8]
         s["pid"] = None
@@ -339,12 +344,13 @@ def main() -> int:
                 s["pid"] = active_workers[short]
             else:
                 s["status"] = "↳STALE"
-        elif s["cwd"] in live and s["cwd"] not in seen_live_cwd:
-            s["status"] = "LIVE"
-            s["pid"] = live[s["cwd"]]
-            seen_live_cwd.add(s["cwd"])
         else:
-            s["status"] = "ENDED"
+            pid = session_pids.get(s["session_id"])
+            if pid and is_pid_alive(pid):
+                s["status"] = "LIVE"
+                s["pid"] = pid
+            else:
+                s["status"] = "ENDED"
 
     if not args.all:
         sessions = [s for s in sessions if s["status"] not in ("ENDED", "↳DONE")]
@@ -377,8 +383,9 @@ def main() -> int:
               f"{custom[:20]:<20} {ai[:24]:<24} {s['session_id'][:8]:<10} "
               f"{cwd[:28]:<28} {msg[:50]}")
     agent_count = sum(1 for s in sessions if s.get("_is_agent"))
+    live_count = sum(1 for s in sessions if s["status"] == "LIVE")
     print(f"\n{len(sessions)} session(s) · {agent_count} agent · "
-          f"{len(live)} live claude process cwd(s) · source: {projects}")
+          f"{live_count} live · source: {projects}")
     return 0
 
 
