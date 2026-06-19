@@ -23,7 +23,7 @@ clawprints uses [uv](https://docs.astral.sh/uv/) to manage its dependency (`psut
 | Status | Color | Meaning |
 |--------|-------|---------|
 | LIVE | green | Interactive session with a detected running Claude process |
-| ENDED | gray | Interactive session whose process is gone — transcript only, not resumable |
+| ENDED | gray | Interactive session whose process is gone — transcript only |
 | ↳WORK | yellow | Background agent job actively running |
 | ↳WAIT | red | Background agent job alive in the daemon but not actively running — likely blocked on user input |
 | ↳DONE | blue | Background agent job that ran to completion. Resumable via `claude --resume <id>`. |
@@ -33,7 +33,7 @@ Agent sessions (↳) are sourced from `~/.claude/jobs/` and `~/.claude/daemon/ro
 
 ## Default behavior
 
-Running `./clawprints.py` with no flags shows all sessions regardless of age, but only those that are still active: LIVE, ↳WORK, ↳WAIT, and ↳STALE. Ended interactive sessions (ENDED) and completed agent jobs (↳DONE) are hidden unless you pass `--all`. Use `--hours N` to further narrow the view to sessions active within the last N hours.
+Running `./clawprints.py` with no flags shows all sessions regardless of age, but only those that are still active: LIVE, ↳WORK, ↳WAIT, and ↳STALE. Sessions that are no longer active — ended interactive sessions (ENDED) and completed agent jobs (↳DONE) — are hidden unless you pass `--all`. Use `--hours N` to further narrow the view to sessions active within the last N hours.
 
 ## Usage
 
